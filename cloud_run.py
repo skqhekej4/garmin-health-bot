@@ -1,13 +1,14 @@
 """
-클라우드 아침 브리핑 흐름 (GitHub Actions 전용) — 대화형
-=====================================================
-1) 각 사용자에게 문진을 '하나씩' 진행 (누르면 다음 질문). 최대 Q_BUDGET_MIN분 대기.
-2) 핵심 4개(피로도·근육통·심리스트레스·수면만족)를 답했으면 → 완료 멘트
-   → (답한 사람 있으면) 가민 데이터 수집 → 그 사람 브리핑 발송.
-3) 다 못 받았으면 → '오늘 브리핑 건너뜀' 멘트, 발송 안 함.
+클라우드 아침/점심 브리핑 흐름 (GitHub Actions, 공개 저장소=무제한 실행시간)
+================================================================
+- morning : 09시경 시작, ~10시까지 동시 대화형 문진. 답하면 브리핑.
+            10시까지 무응답이면 점심 재시도 안내.
+- lunch   : 11:30 시작, ~13시까지 재시도. 답하면 브리핑.
+            아침에 이미 받은 사람은 건너뜀. 끝까지 무응답이면 '종료' 멘트.
 
-문진을 먼저 받고 '그 뒤에' 가민을 수집하므로(보통 9시 가까움) 수면 데이터 동기화에 유리.
-사용: python cloud_run.py
+상태는 시트 '브리핑상태' 컬럼('', 발송, 종료)에 기록 → 중복 방지.
+대기시간(분)은 Q_BUDGET_MIN 환경변수로 조절.
+사용: python cloud_run.py morning|lunch
 """
 import os
 import sys
@@ -18,50 +19,103 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import gspread
+from google.oauth2.service_account import Credentials
+
 import step4_telegram_bot as s4
 import step5_analyze_report as s5
 
 BASE_DIR = Path(__file__).parent.resolve()
-CORE = ["피로도", "근육통", "심리스트레스", "수면만족"]   # 이 4개 다 답하면 브리핑 발송
+SERVICE_ACCOUNT_FILE = str(BASE_DIR / os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json"))
+SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", "가민건강코치")
+HEADERS = s4.HEADERS
+CORE = ["피로도", "근육통", "심리스트레스", "수면만족"]
 USERS = s5.USERS  # {이름: {chat_id, tab, gender, trend_key, profile}}
 
 
+def _ws(tab):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    return gspread.authorize(creds).open(SHEET_NAME).worksheet(tab)
+
+
+def get_state(tab):
+    try:
+        ws = _ws(tab)
+        today = date.today().isoformat()
+        col = ws.col_values(1)
+        for i, d in enumerate(col):
+            if d == today:
+                row = ws.row_values(i + 1)
+                idx = HEADERS.index("브리핑상태")
+                return row[idx] if idx < len(row) else ""
+    except Exception as e:
+        print(f"  상태읽기 실패({tab}): {e}")
+    return ""
+
+
+def set_state(tab, value):
+    try:
+        ws = _ws(tab)
+        today = date.today().isoformat()
+        col = ws.col_values(1)
+        idx = HEADERS.index("브리핑상태")
+        for i, d in enumerate(col):
+            if d == today:
+                ws.update_cell(i + 1, idx + 1, value)
+                return
+        row = [""] * len(HEADERS)
+        row[0] = today
+        row[idx] = value
+        ws.update(values=[row], range_name=f"A{len(col) + 1}")
+    except Exception as e:
+        print(f"  상태쓰기 실패({tab}): {e}")
+
+
 def run_step3():
-    """가민 수집 새로고침 (양쪽 사용자, 시트 갱신). 문진/상태는 보존됨."""
     subprocess.run([sys.executable, str(BASE_DIR / "step3_collect_and_save.py")], cwd=str(BASE_DIR))
 
 
 def main():
-    print(f"{'=' * 50}\n  아침 브리핑 흐름  ({date.today()})\n{'=' * 50}")
-    budget = int(os.getenv("Q_BUDGET_MIN", "25"))
-    s4.flush_updates()  # 이전 백로그 비우기
+    mode = sys.argv[1] if len(sys.argv) > 1 else "morning"
+    budget = int(os.getenv("Q_BUDGET_MIN", "60"))
+    print(f"{'=' * 50}\n  cloud_run: {mode}  ({date.today()}, 대기 {budget}분)\n{'=' * 50}")
 
-    # 1) 사용자별 대화형 문진 (하나씩)
-    results = {}
-    for name, info in USERS.items():
-        u = {"name": name, "tab": info["tab"], "gender": info["gender"]}
-        print(f"\n▶ {name} 문진 시작 (최대 {budget}분 대기)")
-        answers = s4.run_questionnaire(info["chat_id"], u, budget_minutes=budget, auto_confirm=False)
-        ok = all(answers.get(k) for k in CORE)
-        # 즉시 피드백
-        if ok:
-            s4.send_text(info["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
-        else:
-            s4.send_text(info["chat_id"], "📭 문진을 다 받지 못해 오늘 브리핑은 건너뛸게요.\n내일 아침에 다시 만나요! 🌙")
-        results[name] = (info, u, answers, ok)
+    # 아직 발송/종료 안 된 사용자만 대상
+    pending = [(n, i) for n, i in USERS.items() if get_state(i["tab"]) not in ("발송", "종료")]
+    if not pending:
+        print("대상 없음(이미 발송/종료) — 끝")
+        return
 
-    # 2) 답한 사람이 있으면 가민 수집 (이 시점이면 9시 가까워 동기화 양호)
-    if any(ok for _, _, _, ok in results.values()):
-        print("\n▶ 가민 데이터 수집")
+    s4.flush_updates()
+    users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"]} for n, i in pending]
+
+    # 동시 대화형 문진
+    results = s4.run_session_multi(users, budget_minutes=budget)
+
+    # 충분히 답한 사람
+    done = [(n, i) for n, i in pending if all(results.get(n, {}).get(k) for k in CORE)]
+    if done:
+        print(f"  문진 완료: {[n for n, _ in done]} → 가민 수집")
         run_step3()
+        for n, i in done:
+            u = {"name": n, "tab": i["tab"], "gender": i["gender"]}
+            s4.save_answers_to_sheet(u, results[n])
+            s4.send_text(i["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
+            if s5.report_user(n, i, send=True):
+                set_state(i["tab"], "발송")
 
-    # 3) 답한 사람에게 브리핑 발송
-    for name, (info, u, answers, ok) in results.items():
-        if not ok:
-            print(f"  [{name}] 미응답 — 브리핑 생략")
+    # 미응답 처리
+    for n, i in pending:
+        if get_state(i["tab"]) == "발송":
             continue
-        s4.save_answers_to_sheet(u, answers)
-        s5.report_user(name, info, send=True)
+        if mode == "lunch":
+            s4.send_text(i["chat_id"], "📭 오늘은 문진 답변이 없어서 브리핑을 보내지 않았어요.\n내일 아침에 다시 만나요! 🌙")
+            set_state(i["tab"], "종료")
+            print(f"  [{n}] 종료")
+        else:  # morning 실패 → 점심 재시도
+            s4.send_text(i["chat_id"], "⏰ 오전 문진을 못 받았어요. 점심때(11:30~) 다시 보낼게요!")
+            print(f"  [{n}] 오전 미응답 — 점심 재시도 예정")
 
     print("\n완료")
 

@@ -221,6 +221,99 @@ def collect_answers():
     return answers
 
 
+# ════════════════════════════════════════════════════════════
+#  동시 대화형 문진 (여러 사용자) — 단일 getUpdates 루프로 각자 진행
+# ════════════════════════════════════════════════════════════
+def _send_current_q(cid, st):
+    """현재 질문을 버튼과 함께 전송하고 message_id 기록"""
+    q = st["questions"][st["idx"]]
+    keyboard, row = [], []
+    for b in q["buttons"]:
+        row.append({"text": b, "callback_data": b})
+        if len(row) >= 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    text = f"📋 *{st['idx'] + 1}/{len(st['questions'])}* {q['text']}"
+    r = tg_post("sendMessage", {"chat_id": cid, "text": text, "parse_mode": "Markdown",
+                                "reply_markup": {"inline_keyboard": keyboard}})
+    st["sent_msg_id"] = r.get("result", {}).get("message_id")
+
+
+def _advance(cid, st):
+    """이전 질문 키보드 제거 후 다음 질문(또는 완료)"""
+    if st["sent_msg_id"]:
+        remove_keyboard(cid, st["sent_msg_id"], "")
+    st["idx"] += 1
+    if st["idx"] >= len(st["questions"]):
+        st["done"] = True
+    else:
+        _send_current_q(cid, st)
+
+
+def run_session_multi(users, budget_minutes=60):
+    """여러 사용자 동시 대화형 문진. users:[{chat_id,name,tab,gender}] → {name: answers}"""
+    state = {}
+    today_str = date.today().strftime("%m/%d")
+    for u in users:
+        cid = str(u["chat_id"])
+        state[cid] = {"u": u, "questions": get_questions(u["gender"]), "idx": 0,
+                      "answers": {}, "multi": [], "done": False, "sent_msg_id": None}
+        send_text(cid, f"🌅 *{u['name']}님, 좋은 아침이에요!*\n\n{today_str} 건강 문진이에요. 버튼만 눌러주세요!")
+        _send_current_q(cid, state[cid])
+
+    # 기존 업데이트 무시
+    ups = get_updates(timeout=0)
+    offset = ups[-1]["update_id"] + 1 if ups else 0
+
+    start = time.time()
+    while not all(s["done"] for s in state.values()) and (time.time() - start) < budget_minutes * 60:
+        for upd in get_updates(offset=offset, timeout=10):
+            offset = upd["update_id"] + 1
+            cb = upd.get("callback_query")
+            if not cb:
+                # 텍스트(체중) — 현재 질문이 체중일 때만
+                msg = upd.get("message", {})
+                cid = str(msg.get("chat", {}).get("id", ""))
+                st = state.get(cid)
+                if st and not st["done"] and st["questions"][st["idx"]]["key"] == "체중":
+                    txt = (msg.get("text") or "").strip()
+                    if txt and not txt.startswith("/"):
+                        st["answers"]["체중"] = txt
+                        _advance(cid, st)
+                continue
+            cid = str(cb.get("message", {}).get("chat", {}).get("id", ""))
+            try:
+                answer_callback(cb["id"])
+            except Exception:
+                pass
+            st = state.get(cid)
+            if not st or st["done"]:
+                continue
+            q = st["questions"][st["idx"]]
+            sel = cb.get("data", "")
+            if sel not in set(q["buttons"]):
+                continue  # 이전 질문 버튼 무시
+            if q.get("multi"):
+                if sel == "완료":
+                    st["answers"][q["key"]] = ", ".join(st["multi"]) if st["multi"] else "없음"
+                    st["multi"] = []
+                    _advance(cid, st)
+                elif sel == "없음":
+                    st["answers"][q["key"]] = "없음"
+                    st["multi"] = []
+                    _advance(cid, st)
+                elif sel not in st["multi"]:
+                    st["multi"].append(sel)
+                    send_text(cid, f"✓ {sel} (현재: {', '.join(st['multi'])})\n더 있으면 선택, 끝이면 '완료'")
+            else:
+                st["answers"][q["key"]] = sel
+                _advance(cid, st)
+
+    return {s["u"]["name"]: s["answers"] for s in state.values()}
+
+
 # ─── 버튼식 문진 진행 ───
 def run_questionnaire(chat_id, user_info, timeout_minutes=25, budget_minutes=None, auto_confirm=True):
     """한 사용자에 대해 버튼식 문진 진행 (동기, 하나씩 → 누르면 다음).
