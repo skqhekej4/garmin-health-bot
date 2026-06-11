@@ -222,10 +222,10 @@ def collect_answers():
 
 
 # ─── 버튼식 문진 진행 ───
-def run_questionnaire(chat_id, user_info, timeout_minutes=25, budget_minutes=None):
-    """한 사용자에 대해 버튼식 문진 진행 (동기).
+def run_questionnaire(chat_id, user_info, timeout_minutes=25, budget_minutes=None, auto_confirm=True):
+    """한 사용자에 대해 버튼식 문진 진행 (동기, 하나씩 → 누르면 다음).
     budget_minutes: 사용자당 전체 대기 예산(분). 초과 시 남은 질문은 빈칸 처리.
-    클라우드(GitHub Actions)에서 미응답 사용자가 작업을 오래 붙잡지 않도록."""
+    auto_confirm: True면 끝에 '문진 완료' 요약 메시지 자동 발송."""
     name = user_info["name"]
     gender = user_info["gender"]
     questions = get_questions(gender)
@@ -317,12 +317,13 @@ def run_questionnaire(chat_id, user_info, timeout_minutes=25, budget_minutes=Non
 
         time.sleep(0.3)
 
-    # 완료 메시지
-    confirm = f"✅ *{name}님 문진 완료!*\n\n"
-    for k, v in answers.items():
-        confirm += f"• {k}: {v}\n"
-    confirm += f"\n분석 리포트를 준비 중이에요... 잠시만요! 💪"
-    send_text(chat_id, confirm)
+    # 완료 메시지 (auto_confirm일 때만)
+    if auto_confirm:
+        confirm = f"✅ *{name}님 문진 완료!*\n\n"
+        for k, v in answers.items():
+            confirm += f"• {k}: {v}\n"
+        confirm += f"\n분석 리포트를 준비 중이에요... 잠시만요! 💪"
+        send_text(chat_id, confirm)
 
     return answers
 

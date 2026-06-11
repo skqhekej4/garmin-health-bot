@@ -1,26 +1,17 @@
-name: 가민 건강봇 (문진→체크→브리핑)
+name: 가민 건강봇 (아침 문진→브리핑)
 
 on:
   schedule:
-    - cron: '30 23 * * *'   # 08:30 KST — 문진 발송(ask)
-    - cron: '0 1 * * *'     # 10:00 KST — 체크①
-    - cron: '0 2 * * *'     # 11:00 KST — 체크②
-    - cron: '0 3 * * *'     # 12:00 KST — 체크③
-    - cron: '0 4 * * *'     # 13:00 KST — 마지막 체크(finalcheck)
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: '수동 실행 모드'
-        default: 'ask'
-        type: choice
-        options: ['ask', 'check', 'finalcheck']
+    - cron: '40 23 * * *'   # 08:40 KST — 문진 시작 (대화형, 답하면 브리핑)
+  workflow_dispatch: {}      # 수동 실행 버튼 (테스트용)
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60       # 대화형: 답할 때까지(최대 예산) 살아있음
     env:
       TZ: Asia/Seoul
+      Q_BUDGET_MIN: '25'      # 사용자당 최대 대기(분). 초과 시 그 사람은 건너뜀
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,18 +25,5 @@ jobs:
           printf '%s' "${{ secrets.SERVICE_ACCOUNT_B64 }}" | base64 -d > service_account.json
           printf '%s' "${{ secrets.GARTH_RYU_B64 }}" | base64 -d | tar -xz
           printf '%s' "${{ secrets.GARTH_EK_B64 }}" | base64 -d | tar -xz
-      - name: 모드 결정 후 실행
-        run: |
-          SCHED="${{ github.event.schedule }}"
-          MODE="${{ github.event.inputs.mode }}"
-          if [ -n "$MODE" ]; then
-            RUN_MODE="$MODE"
-          elif [ "$SCHED" = "30 23 * * *" ]; then
-            RUN_MODE="ask"
-          elif [ "$SCHED" = "0 4 * * *" ]; then
-            RUN_MODE="finalcheck"
-          else
-            RUN_MODE="check"
-          fi
-          echo "▶ 실행 모드: $RUN_MODE"
-          python cloud_run.py "$RUN_MODE"
+      - name: 아침 문진→브리핑 실행
+        run: python cloud_run.py
