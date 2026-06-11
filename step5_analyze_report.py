@@ -50,7 +50,7 @@ if CHAT_ID_RYU:
         "tab": "류우",
         "gender": "male",
         "trend_key": "ryu",
-        "profile": "40대 남성, 풀마라톤 러너(대구마라톤 완주, 호놀룰루마라톤 준비중), 트레일러닝(제주 종주 60km 완주, 남해 트레일레이스), 골프 초보, Garmin Epix Pro Gen 2 착용"
+        "profile": "40대 남성, 풀마라톤 러너(대구마라톤 완주), 트레일러닝(제주 종주 60km 완주). 단순 건강유지가 아니라 트레일 대회를 목표로 적극 '훈련'하는 러너 — 훈련 자극이 필요함. Garmin Epix Pro Gen 2 착용"
     }
 if CHAT_ID_EK and CHAT_ID_EK != "eunkyeong_chat_id":
     USERS["은경"] = {
@@ -58,8 +58,35 @@ if CHAT_ID_EK and CHAT_ID_EK != "eunkyeong_chat_id":
         "tab": "은경",
         "gender": "female",
         "trend_key": "eunkyeong",
-        "profile": "40대 여성, 풀마라톤 완주 경험, Garmin Forerunner 265S 착용"
+        "profile": "40대 여성, 풀마라톤 완주 경험. 단순 건강유지가 아니라 트레일 대회를 목표로 적극 '훈련'하는 러너 — 훈련 자극이 필요함. Garmin Forerunner 265S 착용"
     }
+
+
+# 목표 대회 (트레일) — 시기별 훈련 추천의 기준
+RACES = [
+    {"date": "2026-06-27", "name": "15km 트레일 대회", "confirmed": True},
+    {"date": "2026-10", "name": "제주 UTMB 20K (트레일)", "confirmed": False},
+    {"date": "2026-10", "name": "무주 GWTS 20K (트레일)", "confirmed": False},
+]
+
+
+def race_context():
+    """다가오는 대회 D-day 텍스트 + 가장 가까운 확정 대회까지 일수"""
+    today = date.today()
+    lines, nearest = [], None
+    for r in RACES:
+        if r["confirmed"]:
+            try:
+                days = (date.fromisoformat(r["date"]) - today).days
+                if days >= 0:
+                    lines.append(f"• {r['name']}: {r['date']} (D-{days})")
+                    if nearest is None or days < nearest:
+                        nearest = days
+            except Exception:
+                pass
+        else:
+            lines.append(f"• {r['name']}: {r['date']} 예정")
+    return ("\n".join(lines) if lines else "예정 대회 없음"), nearest
 
 
 # ═══════════════════════════════════════════════
@@ -256,6 +283,8 @@ def build_prompt(user_name, user_info, data_rows):
     else:
         level_block = ""
 
+    race_text, days_to_race = race_context()
+
     # 음주/과식 추이 (수면·회복 영향 추적)
     lifestyle_text = "음주/식사 데이터 없음"
     try:
@@ -384,6 +413,10 @@ def build_prompt(user_name, user_info, data_rows):
 훈련 페이스존(가민 예측 기반):
 {zone_text if zone_text else "  (레이스 예측 없음 — 최근 실제 페이스로 추천할 것)"}
 오늘 심폐체력 점수: {today_row.get("VO2max") or "기록없음"}
+
+[★ 다가오는 목표 대회 — 시기에 맞는 '훈련'을 추천할 것]
+{race_text}
+※ 이 사람은 단순 건강유지가 아니라 트레일 대회를 준비하는 러너. 컨디션 괜찮은 날은 '훈련 자극'(언덕·템포·롱런 등)을 적극 추천할 것.
 {gender_instruction}
 [지표 해석 기준 — 이 기준으로 객관 판단할 것]
 • 훈련준비도(0~100): 가민이 수면·HRV·회복시간·부하·스트레스를 종합한 점수.
@@ -442,7 +475,11 @@ def build_prompt(user_name, user_info, data_rows):
 • 내 느낌: 피로·근육통·스트레스 주관을 한 줄. 객관과 다르면 그 차이만 짚기
 
 (3) *🏃 오늘 추천*  ← 실행 2개(최대 3개), 구체적으로. 위 결론과 일관되게
-1. 운동: ★ [훈련 페이스존]에서 골라 **구체적 페이스(범위) + 시간/거리**를 처방. 오늘 회복상태×운동의도 반영 — 🔴면 쉬기 또는 가벼운 걷기, 🟡면 회복조깅/이지존 30~40분, 🟢+강하게 의도면 템포나 인터벌 가능. 통증부위 있으면 주의/대체운동. (예: "이지런 35분, 6:50~7:00/km로 천천히")
+1. 운동: ★ **트레일 대회를 준비하는 러너 기준으로 '훈련'을 처방**(단순 유지·살살만 금지). [훈련 페이스존]에서 골라 구체적 페이스(범위)+시간/거리. 회복상태에 맞춰:
+   - 🟢: **적극 훈련** — 템포/인터벌/언덕반복/롱런(거리·시간 점증) 중 택. 트레일 대비 **언덕·계단·트레일 주행** 적극 권장
+   - 🟡: 이지~모더릿 30~50분 또는 가벼운 질주(스트라이드) 약간 섞기
+   - 🔴: 회복 (대회까지 부상 금물). 단 "오늘 푹 쉬어 내일 강하게" 식 훈련 맥락으로
+   [다가오는 대회] D-day가 가까우면(2~3주) 강도 유지+볼륨 줄이는 샤프닝, 멀면 베이스·지구력·언덕 빌딩. 통증 있으면 대체운동. (예: "언덕 반복 6회, 오르막 전력/내려와 회복")
 2. 생활: 시간·양 포함한 처방 (예: "오후 2시 후 커피 금지", "물 2L+11시 취침")
 
 (4) *📈 최근 추세*  ← 각 한 줄. 데이터 없는 줄은 통째로 생략
