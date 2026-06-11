@@ -1,0 +1,38 @@
+name: 가민 건강봇 일일 실행
+
+on:
+  schedule:
+    # 23:00 UTC = 한국시간 08:00 (매일). GitHub 부하에 따라 몇 분 늦을 수 있음
+    - cron: '0 23 * * *'
+  workflow_dispatch: {}   # 수동 실행 버튼 (Actions 탭에서 누름)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 비밀 파일 복원
+        run: |
+          printf '%s' "${{ secrets.ENV_B64 }}" | base64 -d > .env
+          printf '%s' "${{ secrets.SERVICE_ACCOUNT_B64 }}" | base64 -d > service_account.json
+          printf '%s' "${{ secrets.GARTH_RYU_B64 }}" | base64 -d | tar -xz
+          printf '%s' "${{ secrets.GARTH_EK_B64 }}" | base64 -d | tar -xz
+
+      - name: 가민 데이터 수집
+        run: python step3_collect_and_save.py
+
+      - name: 리포트 생성·발송
+        run: python step5_analyze_report.py

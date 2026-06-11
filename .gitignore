@@ -1,0 +1,17 @@
+# ── 비밀 파일 (절대 업로드 금지, GitHub Secrets로 관리) ──
+.env
+.env.example
+service_account.json
+service_account.json.json
+.garth_tokens_ryu/
+.garth_tokens_eunkyeong/
+
+# ── 실행 중 생성되는 파일 ──
+training_trend_*.json
+.tmi_history.json
+cron.log
+__pycache__/
+*.pyc
+
+# ── 로컬/윈도우 전용 ──
+*.bat
