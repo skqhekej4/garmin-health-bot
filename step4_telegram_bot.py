@@ -143,8 +143,10 @@ def get_updates(offset=0, timeout=30):
 
 
 # ─── 버튼식 문진 진행 ───
-def run_questionnaire(chat_id, user_info, timeout_minutes=25):
-    """한 사용자에 대해 버튼식 문진 진행 (동기)"""
+def run_questionnaire(chat_id, user_info, timeout_minutes=25, budget_minutes=None):
+    """한 사용자에 대해 버튼식 문진 진행 (동기).
+    budget_minutes: 사용자당 전체 대기 예산(분). 초과 시 남은 질문은 빈칸 처리.
+    클라우드(GitHub Actions)에서 미응답 사용자가 작업을 오래 붙잡지 않도록."""
     name = user_info["name"]
     gender = user_info["gender"]
     questions = get_questions(gender)
@@ -161,7 +163,13 @@ def run_questionnaire(chat_id, user_info, timeout_minutes=25):
     if updates:
         offset = updates[-1]["update_id"] + 1
 
+    user_start = time.time()
     for i, q in enumerate(questions):
+        # 전체 시간 예산 초과 시 남은 질문은 건너뜀 (미응답 사용자가 작업 오래 붙잡는 것 방지)
+        if budget_minutes and (time.time() - user_start) > budget_minutes * 60:
+            answers[q["key"]] = ""
+            print(f"    {q['key']}: (예산 초과 건너뜀)")
+            continue
         is_multi = q.get("multi", False)
         valid_buttons = set(q["buttons"])  # 현재 질문의 유효 버튼들
         sent = send_question_buttons(chat_id, q["text"], q["buttons"], i + 1, len(questions))
@@ -308,9 +316,11 @@ def main():
             print(f"  [{info['name']}] 테스트: {'성공' if ok else '실패'}")
 
     elif mode in ("--send-and-listen", "--send"):
+        budget_env = os.getenv("Q_BUDGET_MIN")
+        budget = int(budget_env) if budget_env else None
         for chat_id, info in USERS.items():
-            print(f"\n  ▶ {info['name']} 문진 시작")
-            answers = run_questionnaire(chat_id, info)
+            print(f"\n  ▶ {info['name']} 문진 시작 (대기예산: {budget or '무제한'}분)")
+            answers = run_questionnaire(chat_id, info, budget_minutes=budget)
 
             if answers:
                 print(f"  ▶ {info['name']} 시트 저장")

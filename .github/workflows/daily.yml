@@ -15,7 +15,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       TZ: Asia/Seoul
     steps:
@@ -39,6 +39,12 @@ jobs:
 
       - name: 가민 데이터 수집
         run: python step3_collect_and_save.py
+
+      - name: 문진 전송·수집 (실전 실행만, 테스트모드는 건너뜀)
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          Q_BUDGET_MIN: '10'   # 사용자당 최대 10분 대기, 미응답 시 건너뜀
+        run: python step4_telegram_bot.py --send
 
       - name: 리포트 생성·발송
         run: |
