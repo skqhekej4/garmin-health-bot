@@ -252,8 +252,9 @@ def _advance(cid, st):
         _send_current_q(cid, st)
 
 
-def run_session_multi(users, budget_minutes=60):
-    """여러 사용자 동시 대화형 문진. users:[{chat_id,name,tab,gender}] → {name: answers}"""
+def run_session_multi(users, budget_minutes=60, on_done=None):
+    """여러 사용자 동시 대화형 문진. users:[{chat_id,name,tab,gender}] → {name: answers}
+    on_done(user, answers): 각 사용자가 문진을 '완료하는 즉시' 호출(브리핑 즉시 발송용)."""
     state = {}
     today_str = date.today().strftime("%m/%d")
     for u in users:
@@ -267,6 +268,7 @@ def run_session_multi(users, budget_minutes=60):
     ups = get_updates(timeout=0)
     offset = ups[-1]["update_id"] + 1 if ups else 0
 
+    handled = set()
     start = time.time()
     while not all(s["done"] for s in state.values()) and (time.time() - start) < budget_minutes * 60:
         for upd in get_updates(offset=offset, timeout=10):
@@ -310,6 +312,16 @@ def run_session_multi(users, budget_minutes=60):
             else:
                 st["answers"][q["key"]] = sel
                 _advance(cid, st)
+
+        # 완료된 사용자는 즉시 on_done 호출 (다른 사람 기다리지 않고 브리핑 발송)
+        if on_done:
+            for cid, st in state.items():
+                if st["done"] and cid not in handled:
+                    handled.add(cid)
+                    try:
+                        on_done(st["u"], st["answers"])
+                    except Exception as e:
+                        print(f"  on_done 오류({cid}): {e}")
 
     return {s["u"]["name"]: s["answers"] for s in state.values()}
 
