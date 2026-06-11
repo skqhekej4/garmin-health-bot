@@ -1,56 +1,51 @@
-name: 가민 건강봇 일일 실행
+name: 가민 건강봇 (문진→체크→브리핑)
 
 on:
   schedule:
-    # 23:00 UTC = 한국시간 08:00 (매일). GitHub 부하에 따라 몇 분 늦을 수 있음
-    - cron: '0 23 * * *'
-  workflow_dispatch:      # 수동 실행 버튼 (Actions 탭에서 누름)
+    - cron: '30 23 * * *'   # 08:30 KST — 문진 발송(ask)
+    - cron: '0 1 * * *'     # 10:00 KST — 체크①
+    - cron: '0 2 * * *'     # 11:00 KST — 체크②
+    - cron: '0 3 * * *'     # 12:00 KST — 체크③
+    - cron: '0 4 * * *'     # 13:00 KST — 마지막 체크(finalcheck)
+  workflow_dispatch:
     inputs:
-      dry_run:
-        description: '발송 안 하고 테스트만'
-        default: 'false'
+      mode:
+        description: '수동 실행 모드'
+        default: 'ask'
         type: choice
-        options: ['true', 'false']
+        options: ['ask', 'check', 'finalcheck']
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
     env:
       TZ: Asia/Seoul
     steps:
-      - name: 코드 체크아웃
-        uses: actions/checkout@v4
-
-      - name: 파이썬 설치
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: 패키지 설치
         run: pip install -r requirements.txt
-
       - name: 비밀 파일 복원
         run: |
           printf '%s' "${{ secrets.ENV_B64 }}" | base64 -d > .env
           printf '%s' "${{ secrets.SERVICE_ACCOUNT_B64 }}" | base64 -d > service_account.json
           printf '%s' "${{ secrets.GARTH_RYU_B64 }}" | base64 -d | tar -xz
           printf '%s' "${{ secrets.GARTH_EK_B64 }}" | base64 -d | tar -xz
-
-      - name: 가민 데이터 수집
-        run: python step3_collect_and_save.py
-
-      - name: 문진 전송·수집 (실전 실행만, 테스트모드는 건너뜀)
-        if: github.event.inputs.dry_run != 'true'
-        env:
-          Q_BUDGET_MIN: '10'   # 사용자당 최대 10분 대기, 미응답 시 건너뜀
-        run: python step4_telegram_bot.py --send
-
-      - name: 리포트 생성·발송
+      - name: 모드 결정 후 실행
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            echo "[테스트 모드] 발송 생략"
-            python step5_analyze_report.py --test
+          SCHED="${{ github.event.schedule }}"
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -n "$MODE" ]; then
+            RUN_MODE="$MODE"
+          elif [ "$SCHED" = "30 23 * * *" ]; then
+            RUN_MODE="ask"
+          elif [ "$SCHED" = "0 4 * * *" ]; then
+            RUN_MODE="finalcheck"
           else
-            python step5_analyze_report.py
+            RUN_MODE="check"
           fi
+          echo "▶ 실행 모드: $RUN_MODE"
+          python cloud_run.py "$RUN_MODE"

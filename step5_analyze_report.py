@@ -39,6 +39,7 @@ HEADERS = [
     "컨디션", "수면체감", "음주", "식사", "수분", "카페인", "통증부위", "운동계획", "생리주기",
     "HRV상태", "바디배터리", "훈련준비도", "훈련상태", "급성부하", "부하비율", "VO2max",
     "피로도", "근육통", "심리스트레스", "수면만족", "특이사항",
+    "브리핑상태",
 ]
 
 # 사용자 정보
@@ -508,6 +509,24 @@ async def send_telegram(chat_id, text):
                 requests.post(url, data=payload, timeout=10)
         except Exception as e:
             print(f"    전송 실패: {e}")
+
+
+def report_user(user_name, info, send=True):
+    """단일 사용자 리포트 생성 + (옵션) 텔레그램 발송. 성공 시 True."""
+    try:
+        data_rows = get_sheet_data(info["tab"], days=7)
+    except Exception as e:
+        print(f"  [{user_name}] 시트 읽기 실패: {e}")
+        return False
+    if not data_rows:
+        print(f"  [{user_name}] 데이터 없음")
+        return False
+    report = analyze_with_claude(build_prompt(user_name, info, data_rows))
+    print(f"\n----- {user_name} -----\n{report}\n----------")
+    if send:
+        asyncio.run(send_telegram(info["chat_id"], report))
+        print(f"  [{user_name}] 리포트 전송 완료!")
+    return True
 
 
 # ═══════════════════════════════════════════════

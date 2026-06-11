@@ -37,6 +37,7 @@ HEADERS = [
     "컨디션", "수면체감", "음주", "식사", "수분", "카페인", "통증부위", "운동계획", "생리주기",
     "HRV상태", "바디배터리", "훈련준비도", "훈련상태", "급성부하", "부하비율", "VO2max",
     "피로도", "근육통", "심리스트레스", "수면만족", "특이사항",
+    "브리핑상태",
 ]
 
 QUESTIONNAIRE_KEYS = ["피로도", "근육통", "심리스트레스", "수면만족", "음주", "식사", "운동계획", "특이사항", "체중", "생리주기"]
@@ -140,6 +141,84 @@ def get_updates(offset=0, timeout=30):
     except Exception:
         pass
     return []
+
+
+# ════════════════════════════════════════════════════════════
+#  비동기 문진 (클라우드용) — 아침에 보내놓고, 나중 체크에서 답을 회수
+# ════════════════════════════════════════════════════════════
+def flush_updates():
+    """기존(어제) 백로그를 확정 처리해 비움 → 이후 탭만 오늘 답으로 회수됨"""
+    ups = get_updates(offset=0, timeout=0)
+    if ups:
+        get_updates(offset=ups[-1]["update_id"] + 1, timeout=0)  # 확정(삭제)
+
+
+def send_all_questions(chat_id, user_info):
+    """오늘 문진 질문을 모두 한 번에 전송(각 질문=버튼 메시지). 대기 안 함.
+    callback_data를 'key|버튼' 으로 인코딩 → 나중에 어느 질문 답인지 구분."""
+    name = user_info["name"]
+    questions = get_questions(user_info.get("gender", "male"))
+    today_str = date.today().strftime("%m/%d")
+    send_text(chat_id, f"🌅 *{name}님, 좋은 아침이에요!*\n\n{today_str} 건강 문진이에요.\n출근길에 편하게 눌러주세요 (아무 때나, 오후 1시까지 답하면 브리핑이 와요)")
+    time.sleep(0.5)
+    for i, q in enumerate(questions):
+        keyboard, row = [], []
+        for btn in q["buttons"]:
+            row.append({"text": btn, "callback_data": f"{q['key']}|{btn}"})
+            if len(row) >= 3:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        text = f"📋 *{i + 1}/{len(questions)}* {q['text']}"
+        tg_post("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown",
+                                "reply_markup": {"inline_keyboard": keyboard}})
+        time.sleep(0.2)
+
+
+def collect_answers():
+    """그동안 눌린 버튼 답을 getUpdates로 회수. {chat_id: {key: value}} 반환.
+    offset 미확정(읽기만) → 여러 체크가 같은 답을 반복 회수해도 됨(텔레그램 24h 보존)."""
+    updates = get_updates(offset=0, timeout=0)
+    answers = {}          # chat_id -> {key: value}
+    multi = {}            # (chat_id, key) -> set  (특이사항 멀티선택 누적)
+    for u in updates:
+        cb = u.get("callback_query")
+        if cb:
+            chat_id = str(cb.get("message", {}).get("chat", {}).get("id", ""))
+            data = cb.get("data", "") or ""
+            try:
+                answer_callback(cb["id"])  # 버튼 로딩 스피너 해제(반복 호출 무해)
+            except Exception:
+                pass
+            if "|" not in data:
+                continue
+            key, val = data.split("|", 1)
+            a = answers.setdefault(chat_id, {})
+            if key == "특이사항":
+                s = multi.setdefault((chat_id, key), set())
+                if val == "없음":
+                    a[key] = "없음"
+                elif val == "완료":
+                    pass
+                else:
+                    s.add(val)
+                if s:
+                    a[key] = ", ".join(sorted(s))
+            else:
+                a[key] = val  # 마지막 탭이 최종(다시 눌러 수정 가능)
+        else:
+            # 텍스트 답(체중) 처리
+            msg = u.get("message", {})
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            txt = (msg.get("text") or "").strip().replace("kg", "").replace("키로", "")
+            if chat_id and txt and not txt.startswith("/"):
+                try:
+                    float(txt)
+                    answers.setdefault(chat_id, {})["체중"] = txt
+                except ValueError:
+                    pass
+    return answers
 
 
 # ─── 버튼식 문진 진행 ───
