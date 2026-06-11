@@ -4,7 +4,13 @@ on:
   schedule:
     # 23:00 UTC = 한국시간 08:00 (매일). GitHub 부하에 따라 몇 분 늦을 수 있음
     - cron: '0 23 * * *'
-  workflow_dispatch: {}   # 수동 실행 버튼 (Actions 탭에서 누름)
+  workflow_dispatch:      # 수동 실행 버튼 (Actions 탭에서 누름)
+    inputs:
+      dry_run:
+        description: '발송 안 하고 테스트만'
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
 
 jobs:
   run:
@@ -35,4 +41,10 @@ jobs:
         run: python step3_collect_and_save.py
 
       - name: 리포트 생성·발송
-        run: python step5_analyze_report.py
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "[테스트 모드] 발송 생략"
+            python step5_analyze_report.py --test
+          else
+            python step5_analyze_report.py
+          fi
