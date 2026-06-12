@@ -14,7 +14,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -80,6 +80,15 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "morning"
     budget = int(os.getenv("Q_BUDGET_MIN", "60"))
     print(f"{'=' * 50}\n  cloud_run: {mode}  ({date.today()}, 대기 {budget}분)\n{'=' * 50}")
+
+    # ⏰ 시간대 가드: GitHub cron이 지연/글리치로 엉뚱한 시각에 떠도(예: 새벽)
+    #    그 시간대가 아니면 아무 동작 없이 종료 → 사용자 안 깨움. (수동실행은 면제)
+    if os.getenv("SCHEDULED") == "true":
+        hour = datetime.now().hour  # 워크플로우 TZ=Asia/Seoul → KST 기준
+        windows = {"morning": range(7, 11), "lunch": range(11, 15)}
+        if hour not in windows.get(mode, range(0, 24)):
+            print(f"⏰ 현재 {hour}시(KST) — '{mode}' 시간대 아님(스케줄 지연 추정). 동작 없이 종료.")
+            return
 
     # 아직 발송/종료 안 된 사용자만 대상
     pending = [(n, i) for n, i in USERS.items() if get_state(i["tab"]) not in ("발송", "종료")]

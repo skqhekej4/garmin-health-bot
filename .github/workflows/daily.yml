@@ -36,11 +36,11 @@ jobs:
           SCHED="${{ github.event.schedule }}"
           MODE="${{ github.event.inputs.mode }}"
           if [ -n "$MODE" ]; then
-            RUN_MODE="$MODE"; BUDGET=20
+            RUN_MODE="$MODE"; BUDGET=20; SCHED_FLAG=false
           elif [ "$SCHED" = "30 2 * * *" ]; then
-            RUN_MODE="lunch"; BUDGET=90
+            RUN_MODE="lunch"; BUDGET=90; SCHED_FLAG=true
           else
-            RUN_MODE="morning"; BUDGET=70
+            RUN_MODE="morning"; BUDGET=70; SCHED_FLAG=true
           fi
-          echo "▶ 모드: $RUN_MODE / 대기: ${BUDGET}분"
-          Q_BUDGET_MIN=$BUDGET python cloud_run.py "$RUN_MODE"
+          echo "▶ 모드: $RUN_MODE / 대기: ${BUDGET}분 / 스케줄: $SCHED_FLAG"
+          SCHEDULED=$SCHED_FLAG Q_BUDGET_MIN=$BUDGET python cloud_run.py "$RUN_MODE"
