@@ -76,6 +76,25 @@ def run_step3():
     subprocess.run([sys.executable, str(BASE_DIR / "step3_collect_and_save.py")], cwd=str(BASE_DIR))
 
 
+def send_status_to_ryu():
+    """류우에게 오늘 두 사람의 문진/브리핑 현황 요약 발송 (은경 진행 모니터링용)"""
+    today = date.today().isoformat()
+    lines = [f"📋 오늘({date.today().strftime('%m/%d')}) 문진 현황"]
+    for name, info in USERS.items():
+        try:
+            rows = s5.get_sheet_data(info["tab"], days=2)
+            trow = next((r for r in rows if r.get("날짜") == today), {})
+            answered = all(trow.get(k) for k in CORE)
+        except Exception:
+            answered = False
+        sent = get_state(info["tab"]) == "발송"
+        lines.append(f"• {name}: 문진 {'✅' if answered else '❌'} / 브리핑 {'✅' if sent else '❌'}")
+    ryu = USERS.get("류우")
+    if ryu:
+        s4.send_text(ryu["chat_id"], "\n".join(lines))
+        print("  → 류우에게 현황 요약 발송")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "morning"
     budget = int(os.getenv("Q_BUDGET_MIN", "60"))
@@ -92,49 +111,52 @@ def main():
 
     # 아직 발송/종료 안 된 사용자만 대상
     pending = [(n, i) for n, i in USERS.items() if get_state(i["tab"]) not in ("발송", "종료")]
-    if not pending:
-        print("대상 없음(이미 발송/종료) — 끝")
-        return
+    if pending:
+        s4.flush_updates()
+        users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"]} for n, i in pending]
 
-    s4.flush_updates()
-    users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"]} for n, i in pending]
+        garmin = {"done": False}
 
-    garmin = {"done": False}
+        def brief(name, info, answers):
+            """한 사람 브리핑 발송 (가민 수집은 첫 발송 때 1회)"""
+            if not garmin["done"]:
+                print("  가민 수집(첫 완료자)")
+                run_step3()
+                garmin["done"] = True
+            s4.save_answers_to_sheet({"name": name, "tab": info["tab"], "gender": info["gender"]}, answers)
+            s4.send_text(info["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
+            if s5.report_user(name, info, send=True):
+                set_state(info["tab"], "발송")
+                print(f"  [{name}] 브리핑 발송")
 
-    def brief(name, info, answers):
-        """한 사람 브리핑 발송 (가민 수집은 첫 발송 때 1회)"""
-        if not garmin["done"]:
-            print("  가민 수집(첫 완료자)")
-            run_step3()
-            garmin["done"] = True
-        s4.save_answers_to_sheet({"name": name, "tab": info["tab"], "gender": info["gender"]}, answers)
-        s4.send_text(info["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
-        if s5.report_user(name, info, send=True):
-            set_state(info["tab"], "발송")
-            print(f"  [{name}] 브리핑 발송")
+        def on_user_done(u, answers):
+            """문진 완료 즉시 호출 — 다른 사람 기다리지 않고 바로 브리핑"""
+            if all(answers.get(k) for k in CORE):
+                brief(u["name"], USERS[u["name"]], answers)
 
-    def on_user_done(u, answers):
-        """문진 완료 즉시 호출 — 다른 사람 기다리지 않고 바로 브리핑"""
-        if all(answers.get(k) for k in CORE):
-            brief(u["name"], USERS[u["name"]], answers)
+        # 동시 대화형 문진 (각자 끝나는 즉시 on_user_done → 브리핑)
+        results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done)
 
-    # 동시 대화형 문진 (각자 끝나는 즉시 on_user_done → 브리핑)
-    results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done)
+        # 세션 종료 후: 핵심은 답했는데 아직 발송 안 된 사람 + 미응답 처리
+        for n, i in pending:
+            if get_state(i["tab"]) == "발송":
+                continue
+            ans = results.get(n, {})
+            if all(ans.get(k) for k in CORE):
+                brief(n, i, ans)
+            elif mode == "lunch":
+                s4.send_text(i["chat_id"], "📭 오늘은 문진 답변이 없어서 브리핑을 보내지 않았어요.\n내일 아침에 다시 만나요! 🌙")
+                set_state(i["tab"], "종료")
+                print(f"  [{n}] 종료")
+            else:
+                s4.send_text(i["chat_id"], "⏰ 오전 문진을 못 받았어요. 점심때(11:30~) 다시 보낼게요!")
+                print(f"  [{n}] 오전 미응답 — 점심 재시도 예정")
+    else:
+        print("대상 없음(이미 발송/종료)")
 
-    # 세션 종료 후: 핵심은 답했는데 아직 발송 안 된 사람(완료 직전 중단 등) + 미응답 처리
-    for n, i in pending:
-        if get_state(i["tab"]) == "발송":
-            continue
-        ans = results.get(n, {})
-        if all(ans.get(k) for k in CORE):
-            brief(n, i, ans)
-        elif mode == "lunch":
-            s4.send_text(i["chat_id"], "📭 오늘은 문진 답변이 없어서 브리핑을 보내지 않았어요.\n내일 아침에 다시 만나요! 🌙")
-            set_state(i["tab"], "종료")
-            print(f"  [{n}] 종료")
-        else:
-            s4.send_text(i["chat_id"], "⏰ 오전 문진을 못 받았어요. 점심때(11:30~) 다시 보낼게요!")
-            print(f"  [{n}] 오전 미응답 — 점심 재시도 예정")
+    # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
+    if mode == "lunch":
+        send_status_to_ryu()
 
     print("\n완료")
 
