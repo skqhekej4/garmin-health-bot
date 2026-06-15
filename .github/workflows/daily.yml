@@ -1,13 +1,13 @@
 name: 가민 건강봇 (아침/점심 문진→브리핑)
 
+# GitHub 자체 schedule(cron)은 8~14시간씩 지연돼 신뢰 불가 → 제거.
+# 외부 스케줄러(cron-job.org)가 정확한 시각에 아래 workflow_dispatch를 호출한다.
+#   morning: 매일 08:50 KST,  lunch: 매일 11:30 KST
 on:
-  schedule:
-    - cron: '50 23 * * *'   # 08:50 KST — 아침 세션 시작 (~10시까지 듣기)
-    - cron: '30 2 * * *'    # 11:30 KST — 점심 세션 시작 (~13시까지 듣기)
   workflow_dispatch:
     inputs:
       mode:
-        description: '수동 실행 모드(테스트, 대기 20분)'
+        description: '실행 모드'
         default: 'morning'
         type: choice
         options: ['morning', 'lunch']
@@ -15,7 +15,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 100      # 점심 세션 최대 ~90분 + 여유
+    timeout-minutes: 100
     env:
       TZ: Asia/Seoul
     steps:
@@ -31,16 +31,9 @@ jobs:
           printf '%s' "${{ secrets.SERVICE_ACCOUNT_B64 }}" | base64 -d > service_account.json
           printf '%s' "${{ secrets.GARTH_RYU_B64 }}" | base64 -d | tar -xz
           printf '%s' "${{ secrets.GARTH_EK_B64 }}" | base64 -d | tar -xz
-      - name: 모드/대기시간 결정 후 실행
+      - name: 실행
         run: |
-          SCHED="${{ github.event.schedule }}"
           MODE="${{ github.event.inputs.mode }}"
-          if [ -n "$MODE" ]; then
-            RUN_MODE="$MODE"; BUDGET=20; SCHED_FLAG=false
-          elif [ "$SCHED" = "30 2 * * *" ]; then
-            RUN_MODE="lunch"; BUDGET=90; SCHED_FLAG=true
-          else
-            RUN_MODE="morning"; BUDGET=70; SCHED_FLAG=true
-          fi
-          echo "▶ 모드: $RUN_MODE / 대기: ${BUDGET}분 / 스케줄: $SCHED_FLAG"
-          SCHEDULED=$SCHED_FLAG Q_BUDGET_MIN=$BUDGET python cloud_run.py "$RUN_MODE"
+          if [ "$MODE" = "lunch" ]; then BUDGET=90; else BUDGET=70; fi
+          echo "▶ 모드: $MODE / 대기: ${BUDGET}분"
+          Q_BUDGET_MIN=$BUDGET python cloud_run.py "$MODE"
