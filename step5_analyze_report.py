@@ -58,7 +58,7 @@ if CHAT_ID_EK and CHAT_ID_EK != "eunkyeong_chat_id":
         "tab": "은경",
         "gender": "female",
         "trend_key": "eunkyeong",
-        "profile": "40대 여성, 풀마라톤 완주 경험. 단순 건강유지가 아니라 트레일 대회를 목표로 적극 '훈련'하는 러너 — 훈련 자극이 필요함. Garmin Forerunner 265S 착용"
+        "profile": "30대 여성(1992년생, 만 34세), 풀마라톤 완주 경험. 단순 건강유지가 아니라 트레일 대회를 목표로 적극 '훈련'하는 러너 — 훈련 자극이 필요함. Garmin Forerunner 265S 착용"
     }
 
 
