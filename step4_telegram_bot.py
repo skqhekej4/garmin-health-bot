@@ -252,9 +252,10 @@ def _advance(cid, st):
         _send_current_q(cid, st)
 
 
-def run_session_multi(users, budget_minutes=60, on_done=None):
+def run_session_multi(users, budget_minutes=60, on_done=None, on_tick=None):
     """여러 사용자 동시 대화형 문진. users:[{chat_id,name,tab,gender}] → {name: answers}
-    on_done(user, answers): 각 사용자가 문진을 '완료하는 즉시' 호출(브리핑 즉시 발송용)."""
+    on_done(user, answers): 각 사용자가 문진을 '완료하는 즉시' 호출(브리핑 즉시 발송용).
+    on_tick(): 루프마다 주기 호출(동기화 보류자 재확인 등에 사용)."""
     state = {}
     today_str = date.today().strftime("%m/%d")
     for u in users:
@@ -322,6 +323,13 @@ def run_session_multi(users, budget_minutes=60, on_done=None):
                         on_done(st["u"], st["answers"])
                     except Exception as e:
                         print(f"  on_done 오류({cid}): {e}")
+
+        # 주기 콜백 (동기화 보류자 재확인 등). 내부에서 rate-limit 처리.
+        if on_tick:
+            try:
+                on_tick()
+            except Exception as e:
+                print(f"  on_tick 오류: {e}")
 
     return {s["u"]["name"]: s["answers"] for s in state.values()}
 

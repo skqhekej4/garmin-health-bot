@@ -12,6 +12,7 @@
 """
 import os
 import sys
+import time
 import subprocess
 from pathlib import Path
 from datetime import date, datetime
@@ -151,7 +152,7 @@ def main():
         if not today_garmin_present(info["tab"]):
             s4.send_text(info["chat_id"],
                          "✅ 문진은 완료됐어요! 다만 ⚠️ *오늘 가민 데이터가 아직 동기화 전*이라 브리핑을 보류할게요.\n"
-                         "폰에서 *가민 커넥트* 앱을 한 번 열어 동기화해주세요. 동기화되면 다시 보내드릴게요 🙆 (점심 무렵 자동 재시도)")
+                         "폰에서 *가민 커넥트* 앱을 한 번 열어 동기화해주세요. **동기화되면 몇 분 안에** 브리핑이 자동으로 와요 🙆")
             print(f"  [{name}] 가민 미동기화 — 경고, 발송 보류")
             return
         s4.send_text(info["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
@@ -162,6 +163,32 @@ def main():
     def on_user_done(u, answers):
         if all(answers.get(k) for k in CORE):
             brief(u["name"], USERS[u["name"]], answers)
+
+    def try_deliver_deferred():
+        """문진은 답했지만 가민 미동기화로 보류된 사람 → 이제 동기화됐으면 브리핑 발송. 남은 보류 수 반환."""
+        deferred = [(n, i) for n, i in pending
+                    if get_state(i["tab"]) != "발송" and all(today_answers(i["tab"]).get(k) for k in CORE)]
+        if not deferred:
+            return 0
+        run_step3()  # 가민 재수집
+        remaining = 0
+        for n, i in deferred:
+            if today_garmin_present(i["tab"]):
+                s4.send_text(i["chat_id"], "✅ *가민 동기화 확인!* 브리핑 보내드려요 💪")
+                if s5.report_user(n, i, send=True):
+                    set_state(i["tab"], "발송")
+                    print(f"  [{n}] 동기화 후 브리핑 발송")
+            else:
+                remaining += 1
+        return remaining
+
+    # 문진 세션 도중에도 ~5분마다 동기화 재확인 (다른 사람 답 기다리는 동안에도 발송)
+    last_tick = [0.0]
+
+    def on_tick():
+        if time.time() - last_tick[0] >= 300:
+            last_tick[0] = time.time()
+            try_deliver_deferred()
 
     if pending:
         # (A) 이미 오늘 문진 답한 사람 → 문진 다시 안 묻고 가민 재수집 후 브리핑 재시도(동기화 대기였던 경우)
@@ -176,7 +203,7 @@ def main():
         if need_q:
             s4.flush_updates()
             users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"]} for n, i in need_q]
-            results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done)
+            results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done, on_tick=on_tick)
             for n, i in need_q:
                 if get_state(i["tab"]) == "발송":
                     continue
@@ -192,6 +219,13 @@ def main():
                     print(f"  [{n}] 오전 미응답 — 점심 재시도 예정")
     else:
         print("대상 없음(이미 발송/종료)")
+
+    # 세션 후: 동기화 보류된 사람 짧게 재시도 — 앱 열어 동기화하면 점심까지 안 기다리고 몇 분 내 발송
+    waited = 0
+    while try_deliver_deferred() > 0 and waited < 24 * 60:
+        print(f"  동기화 대기 중... {waited//60}분 경과, 4분 후 재확인")
+        time.sleep(240)
+        waited += 240
 
     # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
     if mode == "lunch":
