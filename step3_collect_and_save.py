@@ -396,6 +396,16 @@ def get_latest_workout_detail(days=2):
         out["케이던스"] = round(a.get("averageRunningCadenceInStepsPerMinute") or 0)
         out["유산소효과"] = a.get("aerobicTrainingEffect")
         out["무산소효과"] = a.get("anaerobicTrainingEffect")
+        # 러닝 파워
+        out["평균파워"] = round(a["avgPower"]) if a.get("avgPower") else None
+        out["최대파워"] = round(a["maxPower"]) if a.get("maxPower") else None
+        # 러닝 다이내믹스 (폼)
+        out["접지시간ms"] = round(a["avgGroundContactTime"]) if a.get("avgGroundContactTime") else None
+        out["보폭cm"] = round(a["avgStrideLength"]) if a.get("avgStrideLength") else None
+        out["상하진동cm"] = round(a["avgVerticalOscillation"], 1) if a.get("avgVerticalOscillation") else None
+        out["수직비율"] = round(a["avgVerticalRatio"], 1) if a.get("avgVerticalRatio") else None
+        # 고도
+        out["고도하강m"] = round(a.get("elevationLoss") or 0)
 
         # 구간별(km) 페이스 (후반 페이스 무너짐/네거티브 스플릿 분석용)
         km_paces = []
@@ -418,10 +428,23 @@ def get_latest_workout_detail(days=2):
             t += f"\n심박: 평균 {out['평균심박']}/최대 {out['최대심박']}"
         if out.get("케이던스"):
             t += f", 케이던스 {out['케이던스']}spm"
-        if out.get("고도상승m"):
-            t += f", 고도 +{out['고도상승m']}m"
         if out.get("유산소효과") is not None:
             t += f"\n훈련효과: 유산소 {out['유산소효과']} / 무산소 {out['무산소효과']}"
+        if out.get("평균파워"):
+            t += f"\n파워: 평균 {out['평균파워']}W / 최대 {out['최대파워']}W"
+        dyn = []
+        if out.get("접지시간ms"):
+            dyn.append(f"접지 {out['접지시간ms']}ms")
+        if out.get("보폭cm"):
+            dyn.append(f"보폭 {out['보폭cm']}cm")
+        if out.get("상하진동cm"):
+            dyn.append(f"상하진동 {out['상하진동cm']}cm")
+        if out.get("수직비율"):
+            dyn.append(f"수직비율 {out['수직비율']}%")
+        if dyn:
+            t += f"\n러닝폼: {', '.join(dyn)}"
+        if out.get("고도상승m") or out.get("고도하강m"):
+            t += f"\n고도: 상승 {out.get('고도상승m', 0)}m / 하강 {out.get('고도하강m', 0)}m"
         if km_paces:
             t += f"\n구간별 페이스(km): {' → '.join(km_paces)}"
         out["텍스트"] = t
