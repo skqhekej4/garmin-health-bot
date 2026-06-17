@@ -349,10 +349,92 @@ def get_race_predictions():
     return out
 
 
+def _pace_str(sec_per_km):
+    m = int(sec_per_km // 60)
+    s = int(round(sec_per_km % 60))
+    if s == 60:
+        m += 1
+        s = 0
+    return f"{m}:{s:02d}"
+
+
+def get_latest_workout_detail(days=2):
+    """최근(오늘/어제) 운동 1건 상세 — 심박·구간페이스·케이던스·고도·훈련효과. 자세한 피드백용."""
+    out = {}
+    try:
+        acts = garth.connectapi(
+            "/activitylist-service/activities/search/activities", params={"start": 0, "limit": 5}) or []
+        today = date.today()
+        target = None
+        for a in acts:
+            ds = (a.get("startTimeLocal") or "")[:10]
+            if not ds:
+                continue
+            try:
+                d = datetime.strptime(ds, "%Y-%m-%d").date()
+            except Exception:
+                continue
+            if (today - d).days > days:
+                break
+            tkey = a.get("activityType", {}).get("typeKey", "")
+            if tkey in RUN_TYPES or tkey in ("hiking", "walking", "mountaineering"):
+                target = a
+                break
+        if not target:
+            return out
+
+        a = target
+        spd = a.get("averageSpeed") or 0
+        out["날짜"] = (a.get("startTimeLocal") or "")[:10]
+        out["종목"] = TYPE_MAP.get(a.get("activityType", {}).get("typeKey", ""), "운동")
+        out["거리km"] = round((a.get("distance") or 0) / 1000.0, 2)
+        out["시간분"] = round((a.get("duration") or 0) / 60)
+        out["평균페이스"] = _pace_str(1000.0 / spd) if spd else None
+        out["평균심박"] = round(a["averageHR"]) if a.get("averageHR") else None
+        out["최대심박"] = round(a["maxHR"]) if a.get("maxHR") else None
+        out["고도상승m"] = round(a.get("elevationGain") or 0)
+        out["케이던스"] = round(a.get("averageRunningCadenceInStepsPerMinute") or 0)
+        out["유산소효과"] = a.get("aerobicTrainingEffect")
+        out["무산소효과"] = a.get("anaerobicTrainingEffect")
+
+        # 구간별(km) 페이스 (후반 페이스 무너짐/네거티브 스플릿 분석용)
+        km_paces = []
+        try:
+            sp = garth.connectapi(f"/activity-service/activity/{a.get('activityId')}/splits") or {}
+            for lap in sp.get("lapDTOs", []):
+                ld, lt = lap.get("distance") or 0, lap.get("duration") or 0
+                if ld >= 500 and lt:
+                    km_paces.append(_pace_str(lt / (ld / 1000.0)))
+        except Exception:
+            pass
+        if km_paces:
+            out["구간페이스"] = km_paces
+
+        # 사람이 읽는 요약
+        t = f"{out['날짜']} {out['종목']} {out['거리km']}km/{out['시간분']}분"
+        if out.get("평균페이스"):
+            t += f", 평균 {out['평균페이스']}/km"
+        if out.get("평균심박"):
+            t += f"\n심박: 평균 {out['평균심박']}/최대 {out['최대심박']}"
+        if out.get("케이던스"):
+            t += f", 케이던스 {out['케이던스']}spm"
+        if out.get("고도상승m"):
+            t += f", 고도 +{out['고도상승m']}m"
+        if out.get("유산소효과") is not None:
+            t += f"\n훈련효과: 유산소 {out['유산소효과']} / 무산소 {out['무산소효과']}"
+        if km_paces:
+            t += f"\n구간별 페이스(km): {' → '.join(km_paces)}"
+        out["텍스트"] = t
+    except Exception as e:
+        print(f"    최근운동상세 실패: {e}")
+    return out
+
+
 def save_activity_trend(user_key):
-    """운동 추세 + 레이스 예측을 파일로 저장 (step5가 읽어 리포트에 사용)"""
+    """운동 추세 + 레이스 예측 + 최근운동상세를 파일로 저장 (step5가 읽어 리포트에 사용)"""
     trend = get_activity_trend(28)
     trend["레이스예측"] = get_race_predictions()
+    trend["최근운동"] = get_latest_workout_detail()
     try:
         path = BASE_DIR / f"training_trend_{user_key}.json"
         path.write_text(json.dumps(trend, ensure_ascii=False, indent=2), encoding="utf-8")

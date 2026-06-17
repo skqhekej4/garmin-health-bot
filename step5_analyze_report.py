@@ -259,6 +259,7 @@ def build_prompt(user_name, user_info, data_rows):
     # 운동 추세 + 레이스 예측 로드 (step3가 저장한 파일)
     trend_text = "운동 추세 데이터 없음"
     race_pred = {}
+    workout_detail = ""
     try:
         tk = user_info.get("trend_key")
         if tk:
@@ -268,6 +269,7 @@ def build_prompt(user_name, user_info, data_rows):
                 if td.get("텍스트"):
                     trend_text = td["텍스트"]
                 race_pred = td.get("레이스예측") or {}
+                workout_detail = (td.get("최근운동") or {}).get("텍스트", "")
     except Exception:
         pass
 
@@ -279,7 +281,7 @@ def build_prompt(user_name, user_info, data_rows):
     if is_monday and pred_text:
         level_block = """
 
-(6) *📊 이번주 내 수준*  ← 오늘이 월요일이라 추가. [내 러닝 수준] 데이터로 4~5줄:
+(7) *📊 이번주 내 수준*  ← 오늘이 월요일이라 추가. [내 러닝 수준] 데이터로 4~5줄:
 - 예상 기록(5K/10K/하프/풀)을 보기 좋게 정리
 - 심폐체력 점수와 **본인 나이대(프로필의 나이 참고) 기준** 위치(상위권/보통 등) 한 줄, 쉬운 말로
 - 최근 4주 운동량·빈도 요약, 좋아졌으면 격려
@@ -411,6 +413,9 @@ def build_prompt(user_name, user_info, data_rows):
 [★ 운동 추세 — 최근 28일 꾸준함 점검]
 {trend_text}
 
+[★ 최근 운동 상세 — 자세히 분석해 코치처럼 피드백할 것]
+{workout_detail if workout_detail else "최근 며칠 운동 기록 없음"}
+
 [★ 음주·과식 추이 — 최근 28일 (수면/회복에 직접 영향)]
 {lifestyle_text}
 
@@ -499,7 +504,13 @@ def build_prompt(user_name, user_info, data_rows):
   오늘 요일은 👉 로 강조. 마지막에 오늘 한마디.
 - 오늘 추천(위)과 일관되게. 간결하게
 
-(5) *📈 최근 추세*  ← 각 한 줄. 데이터 없는 줄은 통째로 생략
+(5) *🔬 최근 운동 분석*  ← [최근 운동 상세] 데이터 있을 때만. 가장 최근 운동을 코치처럼 자세히:
+- 구간별 페이스로 **페이스 운용** 평가 (후반 무너졌나 ↘ vs 네거티브 스플릿 잘했나 ↗)
+- 평균/최대 심박이 운동 강도에 맞았나 (이지인데 심박 높으면 과함), 훈련효과(유산소/무산소)가 [훈련 목표]에 부합했나
+- 케이던스(러닝 보통 170~180 권장 — 낮으면 보폭 큰 편), 고도(트레일이면 의미)
+- **잘한 점 1 + 개선점 1** 구체적으로. 데이터 없으면 이 섹션 통째 생략. 2~3문장.
+
+(6) *📈 최근 추세*  ← 각 한 줄. 데이터 없는 줄은 통째로 생략
 🏃 운동: 주당 빈도 + 이번주 증감/긴 공백 (주3회 이상이면 양호)
 🍷 술·야식: 빈도 + 회복 영향. 잦으면(주3회+) 부드럽게 경고. 데이터 거의 없으면 이 줄 생략
 ⚖️ 체중: 최근 체중 + 변화 방향. [체중 추이] 데이터 없으면 이 줄 생략
