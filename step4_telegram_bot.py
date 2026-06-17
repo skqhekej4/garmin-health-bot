@@ -49,10 +49,16 @@ if CHAT_ID_EK and CHAT_ID_EK != "eunkyeong_chat_id":
     USERS[CHAT_ID_EK] = {"name": "은경", "tab": "은경", "gender": "female"}
 
 
-def get_questions(gender="male"):
+def get_questions(gender="male", ask_goal=False):
     """v2: Hooper 웰니스 지수(피로/근육통/스트레스/수면) 기반 + 운동의도 + 특이사항.
-    가민이 객관적으로 못 보는 '주관 신호'만 묻는다. 매일 6~7문항."""
-    questions = [
+    가민이 객관적으로 못 보는 '주관 신호'만 묻는다. 매일 6~7문항.
+    ask_goal=True면 맨 앞에 '이번달 훈련 목표' 선택 질문 추가(월초 1회)."""
+    questions = []
+    if ask_goal:
+        questions.append({"key": "월목표",
+                          "text": "📌 *이번달 훈련 컨셉*을 골라주세요! (이번 달 내내 플랜이 여기 맞춰져요)",
+                          "buttons": ["속도향상", "지구력", "대회대비", "언덕트레일", "건강유지", "체중감량"]})
+    questions += [
         {"key": "피로도", "text": "오늘 몸의 전반적 피로도는? (무거움/지침 정도)",
          "buttons": ["1(거뜬)", "2(가벼움)", "3(보통)", "4(피곤)", "5(탈진)"]},
         {"key": "근육통", "text": "근육통/뻐근함 정도는?",
@@ -260,8 +266,8 @@ def run_session_multi(users, budget_minutes=60, on_done=None, on_tick=None):
     today_str = date.today().strftime("%m/%d")
     for u in users:
         cid = str(u["chat_id"])
-        state[cid] = {"u": u, "questions": get_questions(u["gender"]), "idx": 0,
-                      "answers": {}, "multi": [], "done": False, "sent_msg_id": None}
+        state[cid] = {"u": u, "questions": get_questions(u["gender"], ask_goal=u.get("ask_goal", False)),
+                      "idx": 0, "answers": {}, "multi": [], "done": False, "sent_msg_id": None}
         send_text(cid, f"🌅 *{u['name']}님, 좋은 아침이에요!*\n\n{today_str} 건강 문진이에요. 버튼만 눌러주세요!")
         _send_current_q(cid, state[cid])
 

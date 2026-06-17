@@ -77,6 +77,59 @@ def run_step3():
     subprocess.run([sys.executable, str(BASE_DIR / "step3_collect_and_save.py")], cwd=str(BASE_DIR))
 
 
+# ── 월별 훈련 목표 (시트 '목표' 탭에 사용자/연월별 저장) ──
+GOAL_OPTIONS = {
+    "속도향상": "달리기 속도(스피드) 향상 — 인터벌·템포 중심으로 페이스 끌어올리기",
+    "지구력": "지구력·장거리 — 롱런으로 거리/시간 빌드업",
+    "대회대비": "다가오는 대회 대비 — 강도 유지하며 볼륨 조절(샤프닝/테이퍼)",
+    "언덕트레일": "언덕·트레일 특화 — 오르막/하강·트레일 주행 강화",
+    "건강유지": "부상 없이 가볍게 컨디션 유지",
+    "체중감량": "체중 감량 — 유산소 볼륨 중심",
+}
+
+
+def _goal_ws():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    ss = gspread.authorize(creds).open(SHEET_NAME)
+    try:
+        return ss.worksheet("목표")
+    except Exception:
+        ws = ss.add_worksheet("목표", rows=200, cols=4)
+        ws.update(values=[["사용자", "연월", "목표키", "목표설명"]], range_name="A1")
+        return ws
+
+
+def get_goal(name):
+    """이번 달 선택된 목표 설명 반환 (없으면 None)"""
+    ym = date.today().strftime("%Y-%m")
+    try:
+        for row in _goal_ws().get_all_values()[1:]:
+            if len(row) >= 4 and row[0] == name and row[1] == ym:
+                return row[3]
+    except Exception as e:
+        print(f"  목표 읽기 실패({name}): {e}")
+    return None
+
+
+def set_goal(name, key):
+    """이번 달 목표 저장(키→설명). 같은 달이면 갱신."""
+    ym = date.today().strftime("%Y-%m")
+    desc = GOAL_OPTIONS.get(key, key)
+    try:
+        ws = _goal_ws()
+        rows = ws.get_all_values()
+        for i, row in enumerate(rows[1:], start=2):
+            if len(row) >= 2 and row[0] == name and row[1] == ym:
+                ws.update(values=[[name, ym, key, desc]], range_name=f"A{i}")
+                print(f"  [{name}] 이번달 목표 갱신: {key}")
+                return
+        ws.update(values=[[name, ym, key, desc]], range_name=f"A{len(rows) + 1}")
+        print(f"  [{name}] 이번달 목표 저장: {key}")
+    except Exception as e:
+        print(f"  목표 저장 실패({name}): {e}")
+
+
 def send_status_to_ryu():
     """류우에게 오늘 두 사람의 문진/브리핑 현황 요약 발송 (은경 진행 모니터링용)"""
     today = date.today().isoformat()
@@ -133,6 +186,12 @@ def main():
             print(f"⏰ 현재 {hour}시(KST) — '{mode}' 시간대 아님(스케줄 지연 추정). 동작 없이 종료.")
             return
 
+    # 이번 달 선택된 훈련 목표를 메모리에 반영 (선택한 게 있으면 기본값 대신 사용)
+    for n, i in USERS.items():
+        g = get_goal(n)
+        if g:
+            i["goal"] = g
+
     # 아직 발송/종료 안 된 사용자만 대상
     pending = [(n, i) for n, i in USERS.items() if get_state(i["tab"]) not in ("발송", "종료")]
 
@@ -144,6 +203,9 @@ def main():
         if name in handled:
             return
         handled.add(name)
+        if answers.get("월목표"):  # 이번달 목표 선택했으면 저장 + 즉시 반영
+            set_goal(name, answers["월목표"])
+            info["goal"] = GOAL_OPTIONS.get(answers["월목표"], answers["월목표"])
         if not garmin["done"]:
             print("  가민 수집")
             run_step3()
@@ -202,7 +264,8 @@ def main():
                   if get_state(i["tab"]) != "발송" and not all(today_answers(i["tab"]).get(k) for k in CORE)]
         if need_q:
             s4.flush_updates()
-            users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"]} for n, i in need_q]
+            users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"],
+                      "ask_goal": get_goal(n) is None} for n, i in need_q]
             results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done, on_tick=on_tick)
             for n, i in need_q:
                 if get_state(i["tab"]) == "발송":
