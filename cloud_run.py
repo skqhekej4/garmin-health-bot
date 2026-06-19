@@ -248,7 +248,7 @@ def main():
     last_tick = [0.0]
 
     def on_tick():
-        if time.time() - last_tick[0] >= 480:
+        if time.time() - last_tick[0] >= 600:
             last_tick[0] = time.time()
             try_deliver_deferred()
 
@@ -283,13 +283,13 @@ def main():
     else:
         print("대상 없음(이미 발송/종료)")
 
-    # 세션 후: 동기화 보류된 사람 재시도 — 가민이 늦게 동기화돼도 ~70분까지 계속 확인해 발송
-    # (아침 가민 데이터가 서버에 늦게 올라오는 경우가 잦아 창을 넉넉히)
+    # 세션 후: 동기화 보류된 사람 재시도 — 가민이 늦게 올라와도 ~130분(점심 직전)까지 계속 확인해 발송
+    # (이 계정은 아침 가민 데이터가 기상 후 2~3시간 뒤 올라오는 경우가 잦음). 점심(11:30)은 최종 안전망.
     waited = 0
-    while try_deliver_deferred() > 0 and waited < 70 * 60:
-        print(f"  동기화 대기 중... {waited//60}분 경과, 8분 후 재확인")
-        time.sleep(480)
-        waited += 480
+    while try_deliver_deferred() > 0 and waited < 130 * 60:
+        print(f"  동기화 대기 중... {waited//60}분 경과, 10분 후 재확인")
+        time.sleep(600)
+        waited += 600
 
     # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
     if mode == "lunch":
