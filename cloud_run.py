@@ -261,9 +261,10 @@ def main():
                 print(f"  [{n}] 이미 문진 답함 → 브리핑 재시도")
                 brief(n, i, today_answers(i["tab"]))
 
-        # (B) 아직 문진 안 한 사람만 대화형 문진
-        need_q = [(n, i) for n, i in pending
-                  if get_state(i["tab"]) != "발송" and not all(today_answers(i["tab"]).get(k) for k in CORE)]
+        # (B) 아직 문진 안 한 사람만 대화형 문진 (check 모드는 문진 안 묻고 배송만)
+        need_q = [] if mode == "check" else [
+            (n, i) for n, i in pending
+            if get_state(i["tab"]) != "발송" and not all(today_answers(i["tab"]).get(k) for k in CORE)]
         if need_q:
             s4.flush_updates()
             users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"],
@@ -285,13 +286,13 @@ def main():
     else:
         print("대상 없음(이미 발송/종료)")
 
-    # 세션 후: 동기화 보류된 사람 재시도 — 가민이 늦게 올라와도 ~130분(점심 직전)까지 계속 확인해 발송
-    # (이 계정은 아침 가민 데이터가 기상 후 2~3시간 뒤 올라오는 경우가 잦음). 점심(11:30)은 최종 안전망.
+    # 세션 후: 동기화 보류자 짧게(20분)만 재시도 — 길게 잡으면 타임아웃/다음 실행과 겹침.
+    # 가민이 늦게 올라오는 건(이 계정 ~10시 이후) 별도 'check' 실행(10:30 등)이 받아준다.
     waited = 0
-    while try_deliver_deferred() > 0 and waited < 130 * 60:
-        print(f"  동기화 대기 중... {waited//60}분 경과, 10분 후 재확인")
-        time.sleep(600)
-        waited += 600
+    while try_deliver_deferred() > 0 and waited < 20 * 60:
+        print(f"  동기화 대기 중... {waited//60}분 경과, 5분 후 재확인")
+        time.sleep(300)
+        waited += 300
 
     # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
     if mode == "lunch":

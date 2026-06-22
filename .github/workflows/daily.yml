@@ -10,12 +10,12 @@ on:
         description: '실행 모드'
         default: 'morning'
         type: choice
-        options: ['morning', 'lunch']
+        options: ['morning', 'check', 'lunch']
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 170
+    timeout-minutes: 75
     env:
       TZ: Asia/Seoul
     steps:
@@ -34,6 +34,6 @@ jobs:
       - name: 실행
         run: |
           MODE="${{ github.event.inputs.mode }}"
-          if [ "$MODE" = "lunch" ]; then BUDGET=90; else BUDGET=70; fi
+          if [ "$MODE" = "check" ]; then BUDGET=5; else BUDGET=40; fi
           echo "▶ 모드: $MODE / 대기: ${BUDGET}분"
           Q_BUDGET_MIN=$BUDGET python cloud_run.py "$MODE"
