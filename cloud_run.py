@@ -246,14 +246,6 @@ def main():
                 remaining += 1
         return remaining
 
-    # 문진 세션 도중에도 ~5분마다 동기화 재확인 (다른 사람 답 기다리는 동안에도 발송)
-    last_tick = [0.0]
-
-    def on_tick():
-        if time.time() - last_tick[0] >= 600:
-            last_tick[0] = time.time()
-            try_deliver_deferred()
-
     if pending:
         # (A) 이미 오늘 문진 답한 사람 → 문진 다시 안 묻고 가민 재수집 후 브리핑 재시도(동기화 대기였던 경우)
         for n, i in pending:
@@ -269,7 +261,7 @@ def main():
             s4.flush_updates()
             users = [{"chat_id": i["chat_id"], "name": n, "tab": i["tab"], "gender": i["gender"],
                       "ask_goal": get_goal(n) is None} for n, i in need_q]
-            results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done, on_tick=on_tick)
+            results = s4.run_session_multi(users, budget_minutes=budget, on_done=on_user_done)
             for n, i in need_q:
                 if get_state(i["tab"]) == "발송":
                     continue
@@ -286,13 +278,8 @@ def main():
     else:
         print("대상 없음(이미 발송/종료)")
 
-    # 세션 후: 동기화 보류자 짧게(20분)만 재시도 — 길게 잡으면 타임아웃/다음 실행과 겹침.
-    # 가민이 늦게 올라오는 건(이 계정 ~10시 이후) 별도 'check' 실행(10:30 등)이 받아준다.
-    waited = 0
-    while try_deliver_deferred() > 0 and waited < 20 * 60:
-        print(f"  동기화 대기 중... {waited//60}분 경과, 5분 후 재확인")
-        time.sleep(300)
-        waited += 300
+    # ※ 실행 내 반복 재시도(재로그인)는 제거함 — 가민 429(Too Many Requests) 유발.
+    #   각 실행은 가민 로그인 1회만. 늦게 올라오는 데이터는 '다음 예약 실행'(10:30/11:30/12:00)이 받는다.
 
     # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
     if mode == "lunch":
