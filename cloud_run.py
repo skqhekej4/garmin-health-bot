@@ -181,7 +181,7 @@ def main():
     #    그 시간대가 아니면 아무 동작 없이 종료 → 사용자 안 깨움. (수동실행은 면제)
     if os.getenv("SCHEDULED") == "true":
         hour = datetime.now().hour  # 워크플로우 TZ=Asia/Seoul → KST 기준
-        windows = {"morning": range(7, 11), "lunch": range(11, 15)}
+        windows = {"morning": range(7, 11), "lunch": range(11, 15), "final": range(11, 15)}
         if hour not in windows.get(mode, range(0, 24)):
             print(f"⏰ 현재 {hour}시(KST) — '{mode}' 시간대 아님(스케줄 지연 추정). 동작 없이 종료.")
             return
@@ -212,11 +212,18 @@ def main():
             garmin["done"] = True
         s4.save_answers_to_sheet({"name": name, "tab": info["tab"], "gender": info["gender"]}, answers)
         if not today_garmin_present(info["tab"]):
+            if mode == "final":
+                tail = ("오늘은 가민 데이터가 끝내 안 올라왔네요 😅\n"
+                        "(내일은 *오전 9시 전* 에 문진 주시면 확실히 받아요!)")
+            elif mode == "lunch":
+                tail = "데이터가 올라오는 대로, 곧 *12:30 마지막 점검* 때 자동으로 보내드려요 🙆"
+            else:
+                tail = "데이터가 동기화되면 *다음 자동 점검*(오전 10:30·11:30·12:30) 때 바로 와요 🙆 (따로 안 하셔도 됩니다)"
             s4.send_text(info["chat_id"],
                          "✅ 문진은 완료됐어요! 다만 ⚠️ *오늘 가민 데이터가 아직 안 올라왔어요.*\n"
                          "• 아직 동기화 안 했으면 → *가민 커넥트* 앱을 한 번 열어주세요\n"
-                         "• 이미 했으면 → 가민이 아침 데이터(수면·준비도) 계산 중이라 그래요\n"
-                         "데이터가 준비되는 즉시 — *보통 오전 10시~10시 반쯤* — 브리핑이 자동으로 와요 🙆 (따로 안 하셔도 됩니다)")
+                         "• 이미 했으면 → 가민이 데이터(수면·준비도) 계산 중이라 그래요\n"
+                         + tail)
             print(f"  [{name}] 가민 미동기화 — 경고, 발송 보류")
             return
         s4.send_text(info["chat_id"], "✅ *문진이 완료되었습니다!*\n브리핑을 준비할게요, 잠시만요 💪")
@@ -254,7 +261,7 @@ def main():
                 brief(n, i, today_answers(i["tab"]))
 
         # (B) 아직 문진 안 한 사람만 대화형 문진 (check 모드는 문진 안 묻고 배송만)
-        need_q = [] if mode == "check" else [
+        need_q = [] if mode in ("check", "final") else [
             (n, i) for n, i in pending
             if get_state(i["tab"]) != "발송" and not all(today_answers(i["tab"]).get(k) for k in CORE)]
         if need_q:
@@ -279,10 +286,14 @@ def main():
         print("대상 없음(이미 발송/종료)")
 
     # ※ 실행 내 반복 재시도(재로그인)는 제거함 — 가민 429(Too Many Requests) 유발.
-    #   각 실행은 가민 로그인 1회만. 늦게 올라오는 데이터는 '다음 예약 실행'(10:30/11:30/12:00)이 받는다.
+    #   각 실행은 가민 로그인 1회만. 늦게 올라오는 데이터는 '다음 예약 실행'(10:30/11:30/12:30)이 받는다.
 
-    # 점심(하루 마지막 실행)엔 류우에게 두 사람 현황 요약 발송 (모니터링용)
-    if mode == "lunch":
+    # 12:30 마무리 실행: 끝내 미동기화로 못 받은 사람 종료 처리 + 류우에게 현황 요약(모니터링용)
+    if mode == "final":
+        for n, i in pending:
+            if get_state(i["tab"]) not in ("발송", "종료"):
+                set_state(i["tab"], "종료")
+                print(f"  [{n}] 끝내 미동기화 — 마무리 종료")
         send_status_to_ryu()
 
     print("\n완료")

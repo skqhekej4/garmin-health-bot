@@ -2,7 +2,7 @@ name: 가민 건강봇 (아침/점심 문진→브리핑)
 
 # GitHub 자체 schedule(cron)은 8~14시간씩 지연돼 신뢰 불가 → 제거.
 # 외부 스케줄러(cron-job.org)가 정확한 시각에 아래 workflow_dispatch를 호출한다.
-#   morning: 매일 08:50 KST,  lunch: 매일 11:30 KST
+#   morning 08:50 (문진) · check 10:30 (배송) · lunch 11:30 (문진재전송+배송) · final 12:30 (늦은동기화 배송+종료/현황)
 on:
   workflow_dispatch:
     inputs:
@@ -10,7 +10,7 @@ on:
         description: '실행 모드'
         default: 'morning'
         type: choice
-        options: ['morning', 'check', 'lunch']
+        options: ['morning', 'check', 'lunch', 'final']
 
 jobs:
   run:
@@ -34,6 +34,6 @@ jobs:
       - name: 실행
         run: |
           MODE="${{ github.event.inputs.mode }}"
-          if [ "$MODE" = "check" ]; then BUDGET=5; else BUDGET=40; fi
+          if [ "$MODE" = "check" ] || [ "$MODE" = "final" ]; then BUDGET=5; else BUDGET=40; fi
           echo "▶ 모드: $MODE / 대기: ${BUDGET}분"
           Q_BUDGET_MIN=$BUDGET python cloud_run.py "$MODE"
