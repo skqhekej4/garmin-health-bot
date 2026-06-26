@@ -15,3 +15,6 @@ __pycache__/
 
 # ── 로컬/윈도우 전용 ──
 *.bat
+
+*.tgz
+phone_secrets*
