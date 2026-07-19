@@ -71,8 +71,8 @@ def resume_only_login(account, attempts=5):
             last_err = e
             msg = str(e)
             if "429" in msg or "Too Many Requests" in msg:
-                wait = 20 * i
-                print(f"[로그인] {account}: 429 레이트리밋 (시도 {i}/{attempts}) — {wait}초 대기 후 재시도")
+                wait = 60 * i
+                print(f"[로그인] {account}: 429 레이트리밋 (시도 {i}/{attempts}) — {wait}초 대기 후 재시도", flush=True)
                 time.sleep(wait)
             else:
                 break  # 429 외 오류는 재시도 무의미 (토큰 만료 등)
@@ -98,13 +98,15 @@ def section(title):
 def phase_mine(accounts):
     """참고용 워크아웃 스키마 채굴 + exercise 후보 검색."""
     ref_found = False
+    any_ok = False
     for account in accounts:
         try:
             garth = resume_only_login(account)
+            any_ok = True
         except Exception as e:
             print(f"[오류] {account} 토큰 로그인 실패: {e}")
-            print("비밀번호 로그인은 시도하지 않습니다. 중단.")
-            sys.exit(1)
+            print(f"비밀번호 로그인은 시도하지 않습니다. {account} 건너뜀.")
+            continue
 
         workouts = list_workouts(garth)
         section(f"WORKOUT_LIST ({account}) — 총 {len(workouts)}개")
@@ -129,6 +131,10 @@ def phase_mine(accounts):
             phase_mine._exercises_done = True
             try_exercise_sources(garth)
 
+    if not any_ok:
+        section("ALL_LOGINS_FAILED")
+        print("두 계정 모두 토큰 로그인 실패 (429 지속 = IP 대역/전역 스로틀링 가능성).")
+        sys.exit(1)
     if not ref_found:
         section("REFERENCE_NOT_FOUND")
         print(f"이름이 {REFERENCE_WORKOUT_NAME!r}인 워크아웃을 찾지 못함. 위 목록 확인 요망.")

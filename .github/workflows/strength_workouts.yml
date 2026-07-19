@@ -19,7 +19,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
     env:
       TZ: Asia/Seoul
       PYTHONIOENCODING: utf-8
