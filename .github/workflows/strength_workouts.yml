@@ -1,0 +1,41 @@
+name: 근력 워크아웃 생성 도구 (임시)
+
+# create_strength_workouts.py 실행용 임시 워크플로우.
+# 브랜치 claude/garmin-strength-workout-auto-gen-5io9om 에서 API 호출로 트리거된다.
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: '단계'
+        default: 'mine'
+        type: choice
+        options: ['mine', 'upload']
+      account:
+        description: '대상 계정'
+        default: 'both'
+        type: choice
+        options: ['ryu', 'ek', 'both']
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Seoul
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 패키지 설치
+        run: pip install garth requests
+      - name: 토큰 복원
+        run: |
+          printf '%s' "${{ secrets.GARTH_RYU_B64 }}" | base64 -d | tar -xz
+          printf '%s' "${{ secrets.GARTH_EK_B64 }}" | base64 -d | tar -xz
+      - name: 실행
+        run: |
+          python create_strength_workouts.py \
+            --phase "${{ github.event.inputs.phase }}" \
+            --account "${{ github.event.inputs.account }}"

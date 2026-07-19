@@ -18,3 +18,4 @@ __pycache__/
 
 *.tgz
 phone_secrets*
+schema_ref.json
