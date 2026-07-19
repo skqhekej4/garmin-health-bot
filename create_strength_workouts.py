@@ -16,6 +16,7 @@ import importlib
 import json
 import pathlib
 import sys
+import time
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -42,22 +43,40 @@ EXERCISE_KEYWORDS = {
 }
 
 
-def resume_only_login(account):
-    """저장된 토큰으로만 로그인. 실패 시 예외 — 비밀번호 로그인 금지."""
+def resume_only_login(account, attempts=5):
+    """저장된 토큰으로만 로그인. 실패 시 예외 — 비밀번호 로그인 금지.
+
+    가민 OAuth 교환 엔드포인트가 Actions 공유 IP에 간헐적으로 429를 주므로
+    429/일시 오류는 백오프 재시도한다.
+    """
     import garth
-    importlib.reload(garth)  # 계정 전환 시 세션 초기화 (step3 패턴)
     token_dir = str(BASE_DIR / ACCOUNTS[account])
     if not pathlib.Path(token_dir).exists():
         raise RuntimeError(f"토큰 디렉토리 없음: {token_dir}")
-    garth.configure(domain="garmin.com")
-    garth.resume(token_dir)
-    # 유효성 확인 (읽기 전용 호출)
-    garth.connectapi(
-        "/activitylist-service/activities/search/activities",
-        params={"start": 0, "limit": 1},
-    )
-    print(f"[로그인] {account}: 토큰 로그인 성공")
-    return garth
+
+    last_err = None
+    for i in range(1, attempts + 1):
+        importlib.reload(garth)  # 계정 전환/재시도 시 세션 초기화 (step3 패턴)
+        try:
+            garth.configure(domain="garmin.com")
+            garth.resume(token_dir)
+            # 유효성 확인 (읽기 전용 호출)
+            garth.connectapi(
+                "/activitylist-service/activities/search/activities",
+                params={"start": 0, "limit": 1},
+            )
+            print(f"[로그인] {account}: 토큰 로그인 성공 (시도 {i})")
+            return garth
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            if "429" in msg or "Too Many Requests" in msg:
+                wait = 20 * i
+                print(f"[로그인] {account}: 429 레이트리밋 (시도 {i}/{attempts}) — {wait}초 대기 후 재시도")
+                time.sleep(wait)
+            else:
+                break  # 429 외 오류는 재시도 무의미 (토큰 만료 등)
+    raise RuntimeError(f"토큰 로그인 실패: {last_err}")
 
 
 def list_workouts(garth, limit=200):
